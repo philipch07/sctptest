@@ -6,6 +6,7 @@ import (
 	"log"
 	"math/rand"
 	"net"
+	"strings"
 	"sync/atomic"
 
 	"github.com/enobufs/go-rudp"
@@ -18,23 +19,45 @@ type serverConfig struct {
 	loggerFactory logging.LoggerFactory
 }
 
-type server struct {
+type server interface {
+	start() error
+}
+
+type sctpServer struct {
 	network       string
 	listenPort    int
-	loggerFactory logging.LoggerFactory
 	log           logging.LeveledLogger
+	loggerFactory logging.LoggerFactory
 }
 
-func newServer(cfg *serverConfig) (*server, error) {
-	return &server{
-		network:       cfg.network,
-		listenPort:    cfg.listenPort,
-		loggerFactory: cfg.loggerFactory,
-		log:           cfg.loggerFactory.NewLogger("server"),
-	}, nil
+type tcpServer struct {
+	network    string
+	listenPort int
+	log        logging.LeveledLogger
 }
 
-func (s *server) start() error {
+func newServer(cfg *serverConfig) (server, error) {
+	if strings.HasPrefix(cfg.network, "udp") {
+		return &sctpServer{
+			network:       cfg.network,
+			listenPort:    cfg.listenPort,
+			log:           cfg.loggerFactory.NewLogger("server"),
+			loggerFactory: cfg.loggerFactory,
+		}, nil
+	}
+
+	if strings.HasPrefix(cfg.network, "tcp") {
+		return &tcpServer{
+			network:    cfg.network,
+			listenPort: cfg.listenPort,
+			log:        cfg.loggerFactory.NewLogger("server"),
+		}, nil
+	}
+
+	return nil, fmt.Errorf("invalid network %s", cfg.network)
+}
+
+func (s *sctpServer) start() error {
 	locAddr, err := net.ResolveUDPAddr(s.network, fmt.Sprintf(":%d", s.listenPort))
 	if err != nil {
 		return err
@@ -51,7 +74,7 @@ func (s *server) start() error {
 	}
 	defer l.Close()
 
-	log.Printf("listening on %s ...", l.LocalAddr().String())
+	log.Printf("listening on %s:%s ...", l.LocalAddr().Network(), l.LocalAddr().String())
 
 	for {
 		sconn, err := l.Accept()
@@ -82,6 +105,65 @@ func (s *server) start() error {
 			buf := make([]byte, 64*1024)
 			for {
 				n, err := serverCh.Read(buf)
+				if err != nil {
+					break
+				}
+				_, err = rnd.Read(exp[:n])
+				if err != nil {
+					break
+				}
+				if !bytes.Equal(buf[:n], exp[:n]) {
+					panic(fmt.Errorf("data mismatch"))
+				}
+
+				atomic.AddUint64(&totalBytesReceived, uint64(n))
+			}
+
+			ticker.Stop()
+			log.Printf("closed connecton for %s", sconn.RemoteAddr().String())
+		}()
+	}
+
+	return nil
+}
+
+func (s *tcpServer) start() error {
+	locAddr, err := net.ResolveTCPAddr(s.network, fmt.Sprintf(":%d", s.listenPort))
+	if err != nil {
+		return err
+	}
+
+	// make sure the server is already listening when this function returns
+	l, err := net.ListenTCP(s.network, locAddr)
+	if err != nil {
+		return err
+	}
+	defer l.Close()
+
+	log.Printf("listening on %s:%s ...", l.Addr().Network(), l.Addr().String())
+
+	for {
+		sconn, err := l.Accept()
+		if err != nil {
+			break
+		}
+
+		log.Printf("new connecton from %s ...", sconn.RemoteAddr().String())
+
+		go func() {
+			defer sconn.Close()
+
+			var totalBytesReceived uint64
+			src := rand.NewSource(123)
+			rnd := rand.New(src)
+			exp := make([]byte, 64*1024)
+
+			// Start printing out the observed throughput
+			ticker := throughputTicker(&totalBytesReceived)
+
+			buf := make([]byte, 64*1024)
+			for {
+				n, err := sconn.Read(buf)
 				if err != nil {
 					break
 				}

@@ -1,9 +1,11 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"math/rand"
 	"net"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -17,28 +19,53 @@ type clientConfig struct {
 	loggerFactory logging.LoggerFactory
 }
 
-type client struct {
+type client interface {
+	start() error
+}
+
+type sctpClient struct {
 	network       string
 	remAddr       *net.UDPAddr
 	log           logging.LeveledLogger
 	loggerFactory logging.LoggerFactory
 }
 
-func newClient(cfg *clientConfig) (*client, error) {
-	remAddr, err := net.ResolveUDPAddr(cfg.network, cfg.server)
-	if err != nil {
-		return nil, err
-	}
-
-	return &client{
-		network:       cfg.network,
-		remAddr:       remAddr,
-		log:           cfg.loggerFactory.NewLogger("client"),
-		loggerFactory: cfg.loggerFactory,
-	}, nil
+type tcpClient struct {
+	network string
+	remAddr *net.TCPAddr
+	log     logging.LeveledLogger
 }
 
-func (c *client) start() error {
+func newClient(cfg *clientConfig) (client, error) {
+	if strings.HasPrefix(cfg.network, "udp") {
+		remAddr, err := net.ResolveUDPAddr(cfg.network, cfg.server)
+		if err != nil {
+			return nil, err
+		}
+		return &sctpClient{
+			network:       cfg.network,
+			remAddr:       remAddr,
+			log:           cfg.loggerFactory.NewLogger("client"),
+			loggerFactory: cfg.loggerFactory,
+		}, nil
+	}
+
+	if strings.HasPrefix(cfg.network, "tcp") {
+		remAddr, err := net.ResolveTCPAddr(cfg.network, cfg.server)
+		if err != nil {
+			return nil, err
+		}
+		return &tcpClient{
+			network: cfg.network,
+			remAddr: remAddr,
+			log:     cfg.loggerFactory.NewLogger("client"),
+		}, nil
+	}
+
+	return nil, fmt.Errorf("invalid network %s", cfg.network)
+}
+
+func (c *sctpClient) start() error {
 	log.Printf("connecting to server %s ...", c.remAddr.String())
 	rudpc, err := rudp.Dial(&rudp.DialConfig{
 		Network:       c.network,
@@ -79,6 +106,9 @@ func (c *client) start() error {
 	buf := make([]byte, msgSize)
 	for i := 0; i < totalNumMsgs; i++ {
 		_, err := rnd.Read(buf)
+		if err != nil {
+			panic(err)
+		}
 		if clientCh.BufferedAmount() >= maxBufferAmount {
 			<-writable
 		}
@@ -100,6 +130,60 @@ func (c *client) start() error {
 	close(writable)
 	clientCh.Close()
 	time.Sleep(200 * time.Millisecond)
+	return nil
+}
+
+func (c *tcpClient) start() error {
+	log.Printf("connecting to server %s ...", c.remAddr.String())
+	locAddr := &net.TCPAddr{
+		Port: 0,
+	}
+	tcpc, err := net.DialTCP(c.network, locAddr, c.remAddr)
+	if err != nil {
+		return err
+	}
+	defer tcpc.Close()
+
+	msgSize := 32 * 1024
+	totalNumMsgs := 64 * 1024 // 2GB
+	var totalBytesSent uint64
+
+	// Start printing out the observed throughput
+	ticker := throughputTicker(&totalBytesSent)
+
+	src := rand.NewSource(123)
+	rnd := rand.New(src)
+
+	buf := make([]byte, msgSize)
+	for i := 0; i < totalNumMsgs; i++ {
+		_, err := rnd.Read(buf)
+		if err != nil {
+			panic(err)
+		}
+		var nWritten int
+		for nWritten < msgSize {
+			n, err := tcpc.Write(buf[nWritten:])
+			if err != nil {
+				panic(err)
+			}
+			atomic.AddUint64(&totalBytesSent, uint64(n))
+			nWritten += n
+		}
+	}
+
+	ticker.Stop()
+
+	// Shutdown gracefully
+	tcpc.CloseWrite()
+	for {
+		_, err := tcpc.Read(buf)
+		if err != nil {
+			break
+		}
+	}
+
+	log.Println("client done")
+	tcpc.CloseRead()
 	return nil
 }
 
