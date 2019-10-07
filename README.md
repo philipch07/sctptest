@@ -30,8 +30,8 @@ Usage of ./sctptest:
     	Message size (default 32768)
   -n int
     	Number of messages to transfer (default 32768)
-  -network udp
-    	network type. specify udp for SCTP, or `tcp` for TCP (default "udp4")
+  -network string
+    	Network type. specify "udp" for SCTP, or "tcp" for TCP (default "udp4")
   -s string
     	Remote server address (e.g. 127.0.0.1:40916)
 ```

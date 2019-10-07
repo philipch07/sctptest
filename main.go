@@ -24,7 +24,7 @@ func checkErr(err error) {
 }
 
 func init() {
-	flag.StringVar(&network, "network", "udp4", "network type. specify `udp` for SCTP, or `tcp` for TCP")
+	flag.StringVar(&network, "network", "udp4", "Network type. specify \"udp\" for SCTP, or \"tcp\" for TCP")
 	flag.StringVar(&serverAddr, "s", "", "Remote server address (e.g. 127.0.0.1:40916)")
 	flag.IntVar(&port, "l", 40916, "Port number to listen as a server")
 	flag.IntVar(&msgSize, "m", 32768, "Message size")
