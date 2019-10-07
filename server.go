@@ -8,6 +8,7 @@ import (
 	"net"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/enobufs/go-rudp"
 	"github.com/pion/logging"
@@ -16,16 +17,18 @@ import (
 type serverConfig struct {
 	network       string
 	listenPort    int
+	bufferSize    int
 	loggerFactory logging.LoggerFactory
 }
 
 type server interface {
-	start() error
+	start(time.Duration) error
 }
 
 type sctpServer struct {
 	network       string
 	listenPort    int
+	bufferSize    int
 	log           logging.LeveledLogger
 	loggerFactory logging.LoggerFactory
 }
@@ -41,6 +44,7 @@ func newServer(cfg *serverConfig) (server, error) {
 		return &sctpServer{
 			network:       cfg.network,
 			listenPort:    cfg.listenPort,
+			bufferSize:    cfg.bufferSize,
 			log:           cfg.loggerFactory.NewLogger("server"),
 			loggerFactory: cfg.loggerFactory,
 		}, nil
@@ -57,7 +61,7 @@ func newServer(cfg *serverConfig) (server, error) {
 	return nil, fmt.Errorf("invalid network %s", cfg.network)
 }
 
-func (s *sctpServer) start() error {
+func (s *sctpServer) start(duration time.Duration) error {
 	locAddr, err := net.ResolveUDPAddr(s.network, fmt.Sprintf(":%d", s.listenPort))
 	if err != nil {
 		return err
@@ -66,6 +70,7 @@ func (s *sctpServer) start() error {
 	// make sure the server is already listening when this function returns
 	l, err := rudp.Listen(&rudp.ListenConfig{
 		Network:       s.network,
+		BufferSize:    s.bufferSize,
 		LocalAddr:     locAddr,
 		LoggerFactory: s.loggerFactory,
 	})
@@ -83,6 +88,8 @@ func (s *sctpServer) start() error {
 		}
 
 		log.Printf("new connecton from %s ...", sconn.RemoteAddr().String())
+
+		since := time.Now()
 
 		go func() {
 			defer sconn.Close()
@@ -103,7 +110,7 @@ func (s *sctpServer) start() error {
 			ticker := throughputTicker(&totalBytesReceived)
 
 			buf := make([]byte, 64*1024)
-			for {
+			for duration == 0 || time.Since(since) < duration {
 				n, err := serverCh.Read(buf)
 				if err != nil {
 					break
@@ -127,7 +134,7 @@ func (s *sctpServer) start() error {
 	return nil
 }
 
-func (s *tcpServer) start() error {
+func (s *tcpServer) start(duration time.Duration) error {
 	locAddr, err := net.ResolveTCPAddr(s.network, fmt.Sprintf(":%d", s.listenPort))
 	if err != nil {
 		return err
@@ -150,6 +157,8 @@ func (s *tcpServer) start() error {
 
 		log.Printf("new connecton from %s ...", sconn.RemoteAddr().String())
 
+		since := time.Now()
+
 		go func() {
 			defer sconn.Close()
 
@@ -162,7 +171,7 @@ func (s *tcpServer) start() error {
 			ticker := throughputTicker(&totalBytesReceived)
 
 			buf := make([]byte, 64*1024)
-			for {
+			for duration == 0 || time.Since(since) < duration {
 				n, err := sconn.Read(buf)
 				if err != nil {
 					break

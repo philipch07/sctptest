@@ -16,16 +16,18 @@ import (
 type clientConfig struct {
 	network       string
 	server        string
+	bufferSize    int
 	loggerFactory logging.LoggerFactory
 }
 
 type client interface {
-	start() error
+	start(time.Duration) error
 }
 
 type sctpClient struct {
 	network       string
 	remAddr       *net.UDPAddr
+	bufferSize    int
 	log           logging.LeveledLogger
 	loggerFactory logging.LoggerFactory
 }
@@ -45,6 +47,7 @@ func newClient(cfg *clientConfig) (client, error) {
 		return &sctpClient{
 			network:       cfg.network,
 			remAddr:       remAddr,
+			bufferSize:    cfg.bufferSize,
 			log:           cfg.loggerFactory.NewLogger("client"),
 			loggerFactory: cfg.loggerFactory,
 		}, nil
@@ -65,11 +68,12 @@ func newClient(cfg *clientConfig) (client, error) {
 	return nil, fmt.Errorf("invalid network %s", cfg.network)
 }
 
-func (c *sctpClient) start() error {
+func (c *sctpClient) start(duration time.Duration) error {
 	log.Printf("connecting to server %s ...", c.remAddr.String())
 	rudpc, err := rudp.Dial(&rudp.DialConfig{
 		Network:       c.network,
 		RemoteAddr:    c.remAddr,
+		BufferSize:    c.bufferSize,
 		LoggerFactory: c.loggerFactory,
 	})
 	if err != nil {
@@ -84,8 +88,6 @@ func (c *sctpClient) start() error {
 
 	maxBufferAmount := uint64(1024 * 1024)
 	bufferedAmountTh := uint64(512 * 1024)
-	msgSize := 32 * 1024
-	totalNumMsgs := 64 * 1024 // 2GB
 	var totalBytesSent uint64
 	writable := make(chan struct{}, 1)
 
@@ -103,8 +105,10 @@ func (c *sctpClient) start() error {
 	src := rand.NewSource(123)
 	rnd := rand.New(src)
 
+	since := time.Now()
+
 	buf := make([]byte, msgSize)
-	for i := 0; i < totalNumMsgs; i++ {
+	for i := 0; i < numMsgs && (duration == 0 || time.Since(since) < duration); i++ {
 		_, err := rnd.Read(buf)
 		if err != nil {
 			panic(err)
@@ -133,7 +137,7 @@ func (c *sctpClient) start() error {
 	return nil
 }
 
-func (c *tcpClient) start() error {
+func (c *tcpClient) start(duration time.Duration) error {
 	log.Printf("connecting to server %s ...", c.remAddr.String())
 	locAddr := &net.TCPAddr{
 		Port: 0,
@@ -144,8 +148,6 @@ func (c *tcpClient) start() error {
 	}
 	defer tcpc.Close()
 
-	msgSize := 32 * 1024
-	totalNumMsgs := 64 * 1024 // 2GB
 	var totalBytesSent uint64
 
 	// Start printing out the observed throughput
@@ -154,8 +156,10 @@ func (c *tcpClient) start() error {
 	src := rand.NewSource(123)
 	rnd := rand.New(src)
 
+	since := time.Now()
+
 	buf := make([]byte, msgSize)
-	for i := 0; i < totalNumMsgs; i++ {
+	for i := 0; i < numMsgs && (duration == 0 || time.Since(since) < duration); i++ {
 		_, err := rnd.Read(buf)
 		if err != nil {
 			panic(err)
@@ -188,17 +192,20 @@ func (c *tcpClient) start() error {
 }
 
 func throughputTicker(totalBytes *uint64) *time.Ticker {
-	since := time.Now()
-	ticker := time.NewTicker(time.Second)
+	ticker := time.NewTicker(2 * time.Second)
+	lastBytes := atomic.LoadUint64(totalBytes)
 	go func() {
 		for {
+			since := time.Now()
 			select {
 			case _, ok := <-ticker.C:
 				if !ok {
 					return
 				}
 			}
-			bps := float64(atomic.LoadUint64(totalBytes)*8) / time.Since(since).Seconds()
+			totalBytes := atomic.LoadUint64(totalBytes)
+			bps := float64((totalBytes-lastBytes)*8) / time.Since(since).Seconds()
+			lastBytes = totalBytes
 			log.Printf("Throughput: %.03f Mbps", bps/1024/1024)
 		}
 	}()
