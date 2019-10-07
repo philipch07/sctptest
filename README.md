@@ -1,5 +1,14 @@
 # sctptest
 
+User-sapce SCTP (pion/sctp wrapped by go-rudp) test tool.
+
+## Features
+* Output send / receive throughput to stdout every 2 seconds
+* Select TCP for comparison
+* Select IPv4 and IPv6
+* Server/Client 1:N connections
+* Change buffer size of SCTP and UDP socket
+
 ## Build
 ```sh
 $ git clone git@github.com:enobufs/sctptest.git

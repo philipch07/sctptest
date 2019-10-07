@@ -29,7 +29,7 @@ func init() {
 	flag.IntVar(&port, "l", 40916, "Port number to listen as a server")
 	flag.IntVar(&msgSize, "m", 32768, "Message size")
 	flag.IntVar(&numMsgs, "n", 32768, "Number of messages to transfer")
-	flag.IntVar(&bufferSize, "b", 0, "UDP read/write buffer size (0: use default)")
+	flag.IntVar(&bufferSize, "b", 0, "SCTP read/write buffer size (0: use default)")
 	flag.IntVar(&shutDownIn, "k", 0, "Shutdown timer in seconds (0: defaults to no-shutdown)")
 
 	flag.Parse()
