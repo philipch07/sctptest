@@ -86,8 +86,14 @@ func (c *sctpClient) start(duration time.Duration) error {
 		return err
 	}
 
-	maxBufferAmount := uint64(1024 * 1024)
-	bufferedAmountTh := uint64(512 * 1024)
+	var bufferedAmountTh uint64 = 1024 * 1024
+	var maxBufferAmount uint64 = 2 * bufferedAmountTh
+
+	if c.bufferSize > 0 {
+		maxBufferAmount = uint64(c.bufferSize * 2)
+		bufferedAmountTh = uint64(c.bufferSize)
+	}
+
 	var totalBytesSent uint64
 	writable := make(chan struct{}, 1)
 
