@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"net"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -17,6 +18,7 @@ type clientConfig struct {
 	network       string
 	server        string
 	bufferSize    int
+	chConfig      *rudp.Config
 	loggerFactory logging.LoggerFactory
 }
 
@@ -28,6 +30,7 @@ type sctpClient struct {
 	network       string
 	remAddr       *net.UDPAddr
 	bufferSize    int
+	chConfig      *rudp.Config
 	log           logging.LeveledLogger
 	loggerFactory logging.LoggerFactory
 }
@@ -48,6 +51,7 @@ func newClient(cfg *clientConfig) (client, error) {
 			network:       cfg.network,
 			remAddr:       remAddr,
 			bufferSize:    cfg.bufferSize,
+			chConfig:      cfg.chConfig,
 			log:           cfg.loggerFactory.NewLogger("client"),
 			loggerFactory: cfg.loggerFactory,
 		}, nil
@@ -79,9 +83,17 @@ func (c *sctpClient) start(duration time.Duration) error {
 	if err != nil {
 		return err
 	}
-	defer rudpc.Close()
+	defer func() {
+		rudpc.Close()
+		time.Sleep(500 * time.Millisecond)
+	}()
 
-	clientCh, err := rudpc.OpenChannel(777)
+	var chConfig rudp.Config
+	if c.chConfig != nil {
+		chConfig = *c.chConfig
+	}
+
+	clientCh, err := rudpc.OpenChannel(777, chConfig)
 	if err != nil {
 		return err
 	}
@@ -105,41 +117,54 @@ func (c *sctpClient) start(duration time.Duration) error {
 		}
 	})
 
-	// Start printing out the observed throughput
-	ticker := throughputTicker(&totalBytesSent)
+	var wg sync.WaitGroup
+	var done uint32
 
-	src := rand.NewSource(123)
-	rnd := rand.New(src)
+	// read loop
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
 
-	since := time.Now()
-
-	buf := make([]byte, msgSize)
-	for i := 0; i < numMsgs && (duration == 0 || time.Since(since) < duration); i++ {
-		_, err := rnd.Read(buf)
-		if err != nil {
-			panic(err)
+		buf := make([]byte, 64*1024)
+		for {
+			_, err2 := clientCh.Read(buf)
+			if err2 != nil {
+				break
+			}
 		}
-		if clientCh.BufferedAmount() >= maxBufferAmount {
-			<-writable
+	}()
+
+	// write loop
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		src := rand.NewSource(123)
+		rnd := rand.New(src)
+
+		buf := make([]byte, msgSize)
+		for atomic.LoadUint32(&done) == 0 {
+			_, err2 := rnd.Read(buf)
+			if err2 != nil {
+				panic(err2)
+			}
+			if clientCh.BufferedAmount() >= maxBufferAmount {
+				<-writable
+			}
+			n, err2 := clientCh.Write(buf)
+			if err2 != nil {
+				break
+			}
+			atomic.AddUint64(&totalBytesSent, uint64(n))
 		}
-		n, err := clientCh.Write(buf)
-		if err != nil {
-			panic(err)
-		}
-		atomic.AddUint64(&totalBytesSent, uint64(n))
-	}
+	}()
 
-	ticker.Stop()
-
-	// Wait until the buffer is completely drained
-	for clientCh.BufferedAmount() > 0 {
-		time.Sleep(time.Second)
-	}
-
-	log.Println("client done")
-	close(writable)
+	<-time.NewTimer(duration).C
 	clientCh.Close()
-	time.Sleep(200 * time.Millisecond)
+	atomic.AddUint32(&done, 1)
+	close(writable)
+	wg.Wait()
+	time.Sleep(500 * time.Millisecond)
 	return nil
 }
 
@@ -156,64 +181,54 @@ func (c *tcpClient) start(duration time.Duration) error {
 
 	var totalBytesSent uint64
 
-	// Start printing out the observed throughput
-	ticker := throughputTicker(&totalBytesSent)
+	var wg sync.WaitGroup
+	timer := time.NewTimer(duration)
 
 	src := rand.NewSource(123)
 	rnd := rand.New(src)
 
-	since := time.Now()
+	// read loop
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
 
-	buf := make([]byte, msgSize)
-	for i := 0; i < numMsgs && (duration == 0 || time.Since(since) < duration); i++ {
-		_, err := rnd.Read(buf)
-		if err != nil {
-			panic(err)
+		buf := make([]byte, 64*1024)
+		for {
+			_, err2 := tcpc.Read(buf)
+			if err2 != nil {
+				break
+			}
 		}
-		var nWritten int
-		for nWritten < msgSize {
-			n, err := tcpc.Write(buf[nWritten:])
+	}()
+
+	// write loop
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		buf := make([]byte, msgSize)
+		for {
+			_, err := rnd.Read(buf)
 			if err != nil {
 				panic(err)
 			}
-			atomic.AddUint64(&totalBytesSent, uint64(n))
-			nWritten += n
+			var nWritten int
+			for nWritten < msgSize {
+				n, err := tcpc.Write(buf[nWritten:])
+				if err != nil {
+					return
+				}
+				atomic.AddUint64(&totalBytesSent, uint64(n))
+				nWritten += n
+			}
 		}
-	}
+	}()
 
-	ticker.Stop()
+	<-timer.C
 
 	// Shutdown gracefully
 	tcpc.CloseWrite()
-	for {
-		_, err := tcpc.Read(buf)
-		if err != nil {
-			break
-		}
-	}
-
-	log.Println("client done")
+	wg.Wait()
 	tcpc.CloseRead()
 	return nil
-}
-
-func throughputTicker(totalBytes *uint64) *time.Ticker {
-	ticker := time.NewTicker(2 * time.Second)
-	lastBytes := atomic.LoadUint64(totalBytes)
-	go func() {
-		for {
-			since := time.Now()
-			select {
-			case _, ok := <-ticker.C:
-				if !ok {
-					return
-				}
-			}
-			totalBytes := atomic.LoadUint64(totalBytes)
-			bps := float64((totalBytes-lastBytes)*8) / time.Since(since).Seconds()
-			lastBytes = totalBytes
-			log.Printf("Throughput: %.03f Mbps", bps/1024/1024)
-		}
-	}()
-	return ticker
 }

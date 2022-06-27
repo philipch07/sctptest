@@ -20,20 +20,26 @@ $ go build
 ```
 $ ./sctptest -h
 Usage of ./sctptest:
-  -b int
+  -b <int>
     	UDP read/write buffer size (0: use default)
-  -k int
+  -k <int>
     	Shutdown timer in seconds (0: defaults to no-shutdown)
-  -l int
+  -l <int>
     	Port number to listen as a server (default 40916)
-  -m int
+  -m <int>
     	Message size (default 32768)
-  -n int
+  -n <int>
     	Number of messages to transfer (default 32768)
   -network string
     	Network type. specify "udp" for SCTP, or "tcp" for TCP (default "udp4")
-  -s string
+  -s <string>
     	Remote server address (e.g. 127.0.0.1:40916)
+  -u
+    	Unordered. (UDP client only)
+  -r <int>
+    	Partial reliability remix value (UDP client only)
+  -t <int>
+    	Partial reliability lifetime value (UDP client only)
 ```
 
 ## Run

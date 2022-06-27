@@ -91,7 +91,7 @@ func (s *sctpServer) start(duration time.Duration) error {
 
 		since := time.Now()
 
-		go func() {
+		go func(sconn *rudp.Server) {
 			defer sconn.Close()
 
 			// assume 1 channel per client
@@ -100,6 +100,17 @@ func (s *sctpServer) start(duration time.Duration) error {
 				return
 			}
 			defer serverCh.Close()
+
+			chConfig := serverCh.Config()
+			unordered := (chConfig.ChannelType&0x80 != 0)
+			prName := "Reliable"
+			if chConfig.ChannelType&0x01 != 0 {
+				prName = fmt.Sprintf("maxRetransmits=%d", chConfig.ReliabilityParameter)
+			} else if chConfig.ChannelType&0x02 != 0 {
+				prName = fmt.Sprintf("maxPacketLifeTime=%d", chConfig.ReliabilityParameter)
+			}
+
+			log.Printf("new channel: unordered=%v %s (%02x)", unordered, prName, chConfig.ChannelType)
 
 			var totalBytesReceived uint64
 			src := rand.NewSource(123)
@@ -113,14 +124,19 @@ func (s *sctpServer) start(duration time.Duration) error {
 			for duration == 0 || time.Since(since) < duration {
 				n, err := serverCh.Read(buf)
 				if err != nil {
+					log.Printf("read err: %v", err)
 					break
 				}
-				_, err = rnd.Read(exp[:n])
-				if err != nil {
-					break
-				}
-				if !bytes.Equal(buf[:n], exp[:n]) {
-					panic(fmt.Errorf("data mismatch"))
+
+				if chConfig.ChannelType == 0 {
+					_, err = rnd.Read(exp[:n])
+					if err != nil {
+						break
+					}
+
+					if !bytes.Equal(buf[:n], exp[:n]) {
+						panic(fmt.Errorf("data mismatch"))
+					}
 				}
 
 				atomic.AddUint64(&totalBytesReceived, uint64(n))
@@ -128,7 +144,7 @@ func (s *sctpServer) start(duration time.Duration) error {
 
 			ticker.Stop()
 			log.Printf("closed connecton for %s", sconn.RemoteAddr().String())
-		}()
+		}(sconn)
 	}
 
 	return nil
@@ -193,4 +209,25 @@ func (s *tcpServer) start(duration time.Duration) error {
 	}
 
 	return nil
+}
+
+func throughputTicker(totalBytes *uint64) *time.Ticker {
+	ticker := time.NewTicker(2 * time.Second)
+	lastBytes := atomic.LoadUint64(totalBytes)
+	go func() {
+		for {
+			since := time.Now()
+			select {
+			case _, ok := <-ticker.C:
+				if !ok {
+					return
+				}
+			}
+			totalBytes := atomic.LoadUint64(totalBytes)
+			bps := float64((totalBytes-lastBytes)*8) / time.Since(since).Seconds()
+			lastBytes = totalBytes
+			log.Printf("Throughput: %.03f Mbps", bps/1024/1024)
+		}
+	}()
+	return ticker
 }
