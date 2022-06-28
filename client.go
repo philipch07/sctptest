@@ -85,7 +85,6 @@ func (c *sctpClient) start(duration time.Duration) error {
 	}
 	defer func() {
 		rudpc.Close()
-		time.Sleep(500 * time.Millisecond)
 	}()
 
 	var chConfig rudp.Config
@@ -109,8 +108,14 @@ func (c *sctpClient) start(duration time.Duration) error {
 	var totalBytesSent uint64
 	writable := make(chan struct{}, 1)
 
+	var done uint32
 	clientCh.SetBufferedAmountLowThreshold(bufferedAmountTh)
 	clientCh.OnBufferedAmountLow(func() {
+		if atomic.LoadUint32(&done) != 0 {
+			clientCh.OnBufferedAmountLow(nil)
+			close(writable)
+			return
+		}
 		select {
 		case writable <- struct{}{}:
 		default:
@@ -118,7 +123,6 @@ func (c *sctpClient) start(duration time.Duration) error {
 	})
 
 	var wg sync.WaitGroup
-	var done uint32
 
 	// read loop
 	wg.Add(1)
@@ -160,11 +164,9 @@ func (c *sctpClient) start(duration time.Duration) error {
 	}()
 
 	<-time.NewTimer(duration).C
-	clientCh.Close()
 	atomic.AddUint32(&done, 1)
-	close(writable)
+	clientCh.Close()
 	wg.Wait()
-	time.Sleep(500 * time.Millisecond)
 	return nil
 }
 

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"log"
 	"math/rand"
 	"net"
@@ -124,7 +125,9 @@ func (s *sctpServer) start(duration time.Duration) error {
 			for duration == 0 || time.Since(since) < duration {
 				n, err := serverCh.Read(buf)
 				if err != nil {
-					log.Printf("read err: %v", err)
+					if err != io.EOF {
+						log.Printf("read err: %v", err)
+					}
 					break
 				}
 
