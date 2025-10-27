@@ -11,7 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/enobufs/go-rudp"
+	"github.com/philipch07/go-rudp"
 	"github.com/pion/logging"
 )
 
@@ -215,22 +215,24 @@ func (s *tcpServer) start(duration time.Duration) error {
 }
 
 func throughputTicker(totalBytes *uint64) *time.Ticker {
-	ticker := time.NewTicker(2 * time.Second)
+	ticker := time.NewTicker(1 * time.Second)
 	lastBytes := atomic.LoadUint64(totalBytes)
+	prev := time.Now()
+
 	go func() {
-		for {
-			since := time.Now()
-			select {
-			case _, ok := <-ticker.C:
-				if !ok {
-					return
-				}
+		for range ticker.C {
+			now := time.Now()
+			cur := atomic.LoadUint64(totalBytes)
+			secs := now.Sub(prev).Seconds()
+			if secs <= 0 {
+				continue
 			}
-			totalBytes := atomic.LoadUint64(totalBytes)
-			bps := float64((totalBytes-lastBytes)*8) / time.Since(since).Seconds()
-			lastBytes = totalBytes
+			bps := float64((cur-lastBytes)*8) / secs
+			lastBytes = cur
+			prev = now
 			log.Printf("Throughput: %.03f Mbps", bps/1024/1024)
 		}
 	}()
+
 	return ticker
 }

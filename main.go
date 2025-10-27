@@ -4,7 +4,7 @@ import (
 	"flag"
 	"time"
 
-	"github.com/enobufs/go-rudp"
+	"github.com/philipch07/go-rudp"
 	dcep "github.com/pion/datachannel"
 	"github.com/pion/logging"
 )
@@ -18,7 +18,7 @@ var (
 	duration          int    // in seconds (default: 30 seconds)
 	unordered         bool
 	maxRetransmits    int64 // Partial reliability rexmit. Defaults to -1 (disabled)
-	maxPacketLifeTime int64 // Partial reliability maxPacketLifeTime. Defaults to -1 (disabled)
+	maxPacketLifetime int64 // Partial reliability maxPacketLifetime. Defaults to -1 (disabled)
 )
 
 func checkErr(err error) {
@@ -34,9 +34,9 @@ func init() {
 	flag.IntVar(&msgSize, "m", 32768, "Message size")
 	flag.IntVar(&bufferSize, "b", 0, "SCTP read/write buffer size (0: use default)")
 	flag.IntVar(&duration, "t", 30, "Duration timer in seconds (default: 30 seconds)")
-	flag.BoolVar(&unordered, "unordered", false, "Unordered (false: ordered (default), true: unordered)")
+	flag.BoolVar(&unordered, "u", false, "Unordered (false: ordered (default), true: unordered)")
 	flag.Int64Var(&maxRetransmits, "maxRetransmits", int64(-1), "Partial reliability maxRetransmits (set to false by default)")
-	flag.Int64Var(&maxPacketLifeTime, "maxPacketLifeTime", int64(-1), "Partial reliability maxPacketLifeTime (set to false by default)")
+	flag.Int64Var(&maxPacketLifetime, "maxPacketLifetime", int64(-1), "Partial reliability maxPacketLifetime (set to false by default)")
 
 	flag.Parse()
 }
@@ -52,9 +52,9 @@ func main() {
 	if maxRetransmits >= 0 {
 		chType |= 0x01
 		relParam = uint32(maxRetransmits)
-	} else if maxPacketLifeTime >= 0 {
+	} else if maxPacketLifetime >= 0 {
 		chType |= 0x02
-		relParam = uint32(maxPacketLifeTime)
+		relParam = uint32(maxPacketLifetime)
 	}
 
 	chConfig := &rudp.Config{
