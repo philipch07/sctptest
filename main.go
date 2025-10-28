@@ -31,7 +31,7 @@ func init() {
 	flag.StringVar(&network, "network", "udp4", "Network type. specify \"udp\" for SCTP, or \"tcp\" for TCP")
 	flag.StringVar(&serverAddr, "s", "", "Remote server address (e.g. 127.0.0.1:40916)")
 	flag.IntVar(&port, "l", 40916, "Port number to listen as a server")
-	flag.IntVar(&msgSize, "m", 32768, "Message size")
+	flag.IntVar(&msgSize, "m", 32768, "Message size, max 1073741823")
 	flag.IntVar(&bufferSize, "b", 0, "SCTP read/write buffer size (0: use default)")
 	flag.IntVar(&duration, "t", 30, "Duration timer in seconds (default: 30 seconds)")
 	flag.BoolVar(&unordered, "u", false, "Unordered (false: ordered (default), true: unordered)")

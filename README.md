@@ -25,7 +25,7 @@ Usage of ./sctptest:
   -l <int>
       Port number to listen as a server (default 40916)
   -m <int>
-      Message size (default 32768)
+      Message size (default 32768, max 1073741823)
   -b <int>
       UDP read/write buffer size (0: use default)
   -t <int>
@@ -37,6 +37,11 @@ Usage of ./sctptest:
   -maxPacketLifetime
       Partial reliability maxPacketLifetime (set to false by default)
 ```
+
+note that the max message size has been increased to match defaultMaxSCTPMessageSize (1073741823) from pion/webrtc: https://github.com/pion/webrtc/blob/49a4074cc6b182904ebce3b4da3ba820c544e637/constants.go#L26-L33
+
+# sending messages with large message sizes (> 2^16 or > 65536) does not work due to the server code not properly handling fragmentation.
+it's not an sctp bug. you can also just get around this for tests by using jumbo frames.
 
 ## Run
 Server terminal (the receiver):

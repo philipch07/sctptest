@@ -15,6 +15,8 @@ import (
 	"github.com/pion/logging"
 )
 
+const defaultMaxSCTPMessageSize = 1073741823
+
 type serverConfig struct {
 	network       string
 	listenPort    int
@@ -116,12 +118,12 @@ func (s *sctpServer) start(duration time.Duration) error {
 			var totalBytesReceived uint64
 			src := rand.NewSource(123)
 			rnd := rand.New(src)
-			exp := make([]byte, 64*1024)
+			exp := make([]byte, defaultMaxSCTPMessageSize)
 
 			// Start printing out the observed throughput
 			ticker := throughputTicker(&totalBytesReceived)
 
-			buf := make([]byte, 64*1024)
+			buf := make([]byte, defaultMaxSCTPMessageSize)
 			for duration == 0 || time.Since(since) < duration {
 				n, err := serverCh.Read(buf)
 				if err != nil {
@@ -146,7 +148,7 @@ func (s *sctpServer) start(duration time.Duration) error {
 			}
 
 			ticker.Stop()
-			log.Printf("closed connecton for %s", sconn.RemoteAddr().String())
+			log.Printf("closed connection for %s", sconn.RemoteAddr().String())
 		}(sconn)
 	}
 
@@ -174,7 +176,7 @@ func (s *tcpServer) start(duration time.Duration) error {
 			break
 		}
 
-		log.Printf("new connecton from %s ...", sconn.RemoteAddr().String())
+		log.Printf("new connection from %s ...", sconn.RemoteAddr().String())
 
 		since := time.Now()
 
@@ -184,12 +186,12 @@ func (s *tcpServer) start(duration time.Duration) error {
 			var totalBytesReceived uint64
 			src := rand.NewSource(123)
 			rnd := rand.New(src)
-			exp := make([]byte, 64*1024)
+			exp := make([]byte, defaultMaxSCTPMessageSize)
 
 			// Start printing out the observed throughput
 			ticker := throughputTicker(&totalBytesReceived)
 
-			buf := make([]byte, 64*1024)
+			buf := make([]byte, defaultMaxSCTPMessageSize)
 			for duration == 0 || time.Since(since) < duration {
 				n, err := sconn.Read(buf)
 				if err != nil {
